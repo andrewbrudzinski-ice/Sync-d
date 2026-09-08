@@ -4,11 +4,16 @@ import { useGameStore } from '../../store/gameStore';
 import { Button } from '../ui/Button';
 import { Scoreboard } from '../ui/Scoreboard';
 import { sounds, vibrate } from '../../utils/audio';
+import { CATEGORY_EMOJIS, CATEGORY_LABELS } from '../../types';
 
 type Phase = 'reveal-team' | 'prompt' | 'countdown' | 'judging' | 'secret-a' | 'pass-phone' | 'secret-b' | 'reveal-answers';
 
 export function GameplayScreen() {
-  const { game, currentPrompt, submitResult, skipPrompt, resumeGame, endGame, editScore, restartRound, setShowHostMenu, showHostMenu, appSettings } = useGameStore();
+  const {
+    game, currentPrompt, submitResult, skipPrompt,
+    resumeGame, endGame, editScore, restartRound,
+    setShowHostMenu, showHostMenu, appSettings,
+  } = useGameStore();
 
   const [phase, setPhase] = useState<Phase>('reveal-team');
   const [countdown, setCountdown] = useState<number>(3);
@@ -21,7 +26,7 @@ export function GameplayScreen() {
   const [showScoreboard, setShowScoreboard] = useState(false);
   const [showEditScore, setShowEditScore] = useState(false);
   const [editScores, setEditScores] = useState<Record<string, number>>({});
-  const [specialEvent, setSpecialEvent] = useState<string | null>(null);
+  const [banner, setBanner] = useState<string | null>(null);
 
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -35,7 +40,7 @@ export function GameplayScreen() {
     if (appSettings.vibration) vibrate(pattern);
   }, [appSettings.vibration]);
 
-  // Reset phase on team change
+  // Reset phase when the active team changes
   useEffect(() => {
     setPhase('reveal-team');
     setLastResult(null);
@@ -46,14 +51,31 @@ export function GameplayScreen() {
     setTimerActive(false);
   }, [game?.currentTeamIndex, game?.currentRound]);
 
-  // Check for special events occasionally
+  // Detect perfect round (all teams matched) and comeback
   useEffect(() => {
-    if (game && Math.random() < 0.08 && game.currentRound > 1) {
-      const events = ['🎯 PRECISION ROUND', '🔥 HOT STREAK ROUND'];
-      setSpecialEvent(events[Math.floor(Math.random() * events.length)]);
-      setTimeout(() => setSpecialEvent(null), 3000);
+    if (!game || game.currentTeamIndex !== 0 || game.currentRound <= 1) return;
+    const prevRound = game.currentRound - 1;
+    const roundResults = game.rounds.filter((r) => r.roundNumber === prevRound);
+    if (roundResults.length === game.teams.length) {
+      const allMatched = roundResults.every((r) => r.matched);
+      if (allMatched) {
+        setBanner('🎯 PERFECT ROUND!');
+        setTimeout(() => setBanner(null), 3000);
+        return;
+      }
     }
-  }, [game?.currentRound, game?.currentTeamIndex]);
+    // Comeback: last-place team goes to first
+    if (game.teams.length >= 3) {
+      const sorted = [...game.teams].sort((a, b) => b.score - a.score);
+      const leader = game.teams[game.currentTeamIndex];
+      const isFirst = leader.id === sorted[0].id;
+      const wasLast = sorted[sorted.length - 1].id === leader.id;
+      if (isFirst && wasLast && leader.score > 0) {
+        setBanner('🔄 WHAT A COMEBACK!');
+        setTimeout(() => setBanner(null), 3000);
+      }
+    }
+  }, [game?.currentRound]);
 
   const startCountdown = useCallback(() => {
     setPhase('countdown');
@@ -72,7 +94,6 @@ export function GameplayScreen() {
           buzz([100, 50, 100]);
           clearInterval(countdownRef.current!);
           setPhase('judging');
-          // Start timer if enabled
           const timerSecs = game?.settings.timerSeconds;
           if (timerSecs) {
             setTimerLeft(timerSecs);
@@ -83,7 +104,7 @@ export function GameplayScreen() {
     }, 1000);
   }, [sfx, buzz, game?.settings.timerSeconds]);
 
-  // Timer countdown during judging
+  // Timer countdown
   useEffect(() => {
     if (!timerActive || timerLeft === null) return;
     timerRef.current = setInterval(() => {
@@ -112,18 +133,15 @@ export function GameplayScreen() {
     setLastResult(matched ? 'match' : 'no-match');
     setShowResult(true);
 
+    const team = game?.teams[game?.currentTeamIndex ?? 0];
+
     if (matched) {
       sfx(() => sounds.match());
       buzz([50, 30, 100]);
+      if (team && team.streak >= 2) sfx(() => sounds.streak());
     } else {
       sfx(() => sounds.noMatch());
       buzz([30]);
-    }
-
-    // Check for streak
-    const team = game?.teams[game?.currentTeamIndex ?? 0];
-    if (matched && team && team.streak >= 2) {
-      sfx(() => sounds.streak());
     }
 
     setTimeout(() => {
@@ -143,9 +161,15 @@ export function GameplayScreen() {
   const team = game.teams[game.currentTeamIndex];
   const totalRounds = game.settings.numberOfRounds;
 
+  // Points that will be earned for a match
+  const matchPoints =
+    game.settings.scoringMode === 'standard' ? 1 :
+    game.settings.scoringMode === 'double' ? 2 :
+    team.streak + 1;
+
   return (
     <div className="bg-game min-h-dvh flex flex-col select-none">
-      {/* Background accent */}
+      {/* Background gradient accent */}
       <div className="fixed inset-0 pointer-events-none" aria-hidden>
         <div className="absolute top-0 left-0 right-0 h-64 bg-gradient-to-b from-purple-900/20 to-transparent" />
       </div>
@@ -153,8 +177,8 @@ export function GameplayScreen() {
       {/* Header */}
       <div className="relative z-10 flex items-center justify-between px-5 pt-4 safe-top">
         <button
-          onClick={() => { setShowHostMenu(true); }}
-          className="p-2 rounded-xl bg-white/10 text-white/70 hover:text-white hover:bg-white/15 transition-colors"
+          onClick={() => setShowHostMenu(true)}
+          className="p-2.5 rounded-xl bg-white/10 text-white/70 hover:text-white hover:bg-white/15 transition-colors"
           aria-label="Host Menu"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -162,7 +186,6 @@ export function GameplayScreen() {
           </svg>
         </button>
 
-        {/* Round progress */}
         <div className="text-center">
           <div className="text-xs text-white/40 uppercase tracking-wider">Round</div>
           <div className="text-lg font-black text-white">{game.currentRound} / {totalRounds}</div>
@@ -170,7 +193,7 @@ export function GameplayScreen() {
 
         <button
           onClick={() => setShowScoreboard(!showScoreboard)}
-          className="p-2 rounded-xl bg-white/10 text-white/70 hover:text-white hover:bg-white/15 transition-colors"
+          className="p-2.5 rounded-xl bg-white/10 text-white/70 hover:text-white hover:bg-white/15 transition-colors"
           aria-label="Scoreboard"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -179,38 +202,41 @@ export function GameplayScreen() {
         </button>
       </div>
 
-      {/* Round progress bar */}
+      {/* Progress bar */}
       <div className="px-5 mt-2 relative z-10">
-        <div className="h-1 bg-white/10 rounded-full overflow-hidden">
+        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
           <motion.div
             className="h-full bg-gradient-to-r from-purple-500 to-pink-500 rounded-full"
             initial={false}
             animate={{ width: `${((game.currentRound - 1) / totalRounds) * 100}%` }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.6, ease: 'easeOut' }}
           />
         </div>
-        <div className="flex justify-between mt-1">
+        {/* Team dots */}
+        <div className="flex gap-1 mt-1.5">
           {game.teams.map((t, i) => (
             <div
               key={t.id}
-              className={`flex items-center gap-1 text-xs ${i === game.currentTeamIndex ? 'text-white' : 'text-white/30'}`}
-            >
-              <div className={`w-1.5 h-1.5 rounded-full ${i === game.currentTeamIndex ? 'bg-purple-400' : 'bg-white/20'}`} />
-            </div>
+              className={`flex-1 h-1 rounded-full transition-all duration-300 ${
+                i === game.currentTeamIndex
+                  ? 'bg-purple-400'
+                  : 'bg-white/15'
+              }`}
+            />
           ))}
         </div>
       </div>
 
-      {/* Special event banner */}
+      {/* Event banner */}
       <AnimatePresence>
-        {specialEvent && (
+        {banner && (
           <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="mx-5 mt-3 bg-gradient-to-r from-amber-600/30 to-orange-600/30 border border-amber-500/40 rounded-2xl p-3 text-center font-bold text-amber-300 text-sm z-10"
+            initial={{ opacity: 0, y: -16, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -16, scale: 0.95 }}
+            className="mx-5 mt-3 bg-gradient-to-r from-amber-600/30 to-orange-600/30 border border-amber-500/40 rounded-2xl py-3 px-4 text-center font-black text-amber-300 text-base z-10"
           >
-            {specialEvent}
+            {banner}
           </motion.div>
         )}
       </AnimatePresence>
@@ -219,99 +245,98 @@ export function GameplayScreen() {
       <div className="flex-1 flex flex-col items-center justify-center px-5 py-4 relative z-10">
         <AnimatePresence mode="wait">
 
-          {/* REVEAL TEAM */}
+          {/* ── REVEAL TEAM ──────────────────────────────────────────── */}
           {phase === 'reveal-team' && (
             <motion.div
               key="reveal-team"
               initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9 }}
-              className="flex flex-col items-center gap-8 w-full max-w-sm"
+              className="flex flex-col items-center gap-7 w-full max-w-sm"
             >
               <div className="text-center">
-                <p className="text-white/50 text-sm uppercase tracking-widest mb-2">Up next</p>
-                <div className="text-4xl font-black text-white mb-1">{team.name}</div>
-                <div className="flex items-center justify-center gap-2 text-white/40 text-sm">
-                  <span>{team.score} pts</span>
+                <p className="text-white/50 text-sm uppercase tracking-widest mb-3">Up next</p>
+                <div className="text-4xl font-black text-white mb-2">{team.name}</div>
+                <div className="flex items-center justify-center gap-3 text-sm">
+                  <span className="text-white/40">{team.score} pts</span>
                   {team.streak >= 2 && (
-                    <span className="bg-orange-500/20 text-orange-300 px-2 py-0.5 rounded-full">
+                    <span className="bg-orange-500/20 text-orange-300 px-3 py-1 rounded-full font-bold streak-badge">
                       🔥 {team.streak} streak
                     </span>
                   )}
                 </div>
               </div>
 
-              {/* Team avatar */}
-              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 flex items-center justify-center text-4xl shadow-2xl glow-purple">
-                {team.name.charAt(0).toUpperCase()}
-              </div>
-
-              <Button
-                variant="primary"
-                size="xl"
-                fullWidth
-                onClick={() => {
-                  setPhase('prompt');
-                  sfx(() => sounds.transition());
-                }}
+              <motion.div
+                animate={{ scale: [1, 1.04, 1] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                className="w-28 h-28 rounded-full bg-gradient-to-br from-purple-600 to-pink-500 flex items-center justify-center text-5xl font-black text-white shadow-2xl glow-purple"
               >
+                {team.name.charAt(0).toUpperCase()}
+              </motion.div>
+
+              <Button variant="primary" size="xl" fullWidth onClick={() => {
+                setPhase('prompt');
+                sfx(() => sounds.transition());
+              }}>
                 See Prompt →
               </Button>
             </motion.div>
           )}
 
-          {/* SHOW PROMPT */}
+          {/* ── SHOW PROMPT ──────────────────────────────────────────── */}
           {phase === 'prompt' && (
             <motion.div
               key="prompt"
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -30 }}
-              className="flex flex-col items-center gap-8 w-full max-w-sm"
+              className="flex flex-col items-center gap-7 w-full max-w-sm"
             >
               <div className="text-center">
-                <p className="text-white/40 text-xs uppercase tracking-widest mb-3">{team.name}</p>
-                <div className="text-xs text-purple-400 uppercase tracking-widest mb-4">Your Prompt</div>
+                <p className="text-white/40 text-sm font-semibold">{team.name}</p>
               </div>
 
-              {/* Prompt card */}
+              {/* Prompt card with category badge */}
               <motion.div
                 initial={{ scale: 0.95 }}
                 animate={{ scale: 1 }}
-                className="w-full bg-gradient-to-br from-purple-600/20 to-pink-600/10 border border-purple-500/30 rounded-3xl p-8 text-center shadow-2xl glow-purple"
+                className="w-full bg-gradient-to-br from-purple-600/20 to-pink-600/10 border border-purple-500/30 rounded-3xl p-8 text-center shadow-2xl relative overflow-hidden"
               >
-                <div className="text-white font-bold leading-tight prompt-text">
+                {/* Subtle background glow */}
+                <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-pink-500/5 rounded-3xl" />
+
+                {/* Category badge */}
+                {prompt && (
+                  <div className="inline-flex items-center gap-1.5 bg-white/10 rounded-full px-3 py-1 text-xs text-white/60 font-medium mb-5">
+                    <span>{CATEGORY_EMOJIS[prompt.category]}</span>
+                    <span>{CATEGORY_LABELS[prompt.category]}</span>
+                  </div>
+                )}
+
+                <div className="text-white font-bold leading-tight prompt-text relative">
                   {prompt?.text}
                 </div>
               </motion.div>
 
-              <div className="text-center text-white/50 text-sm">
-                Both partners think of an answer silently…
-              </div>
+              <p className="text-white/40 text-sm text-center">
+                Think of your answer silently — don't say it yet!
+              </p>
 
               <div className="w-full flex gap-3">
                 {!game.settings.secretAnswerMode ? (
-                  <Button
-                    variant="primary"
-                    size="xl"
-                    fullWidth
-                    onClick={startCountdown}
-                  >
+                  <Button variant="primary" size="xl" fullWidth onClick={startCountdown}>
                     Start Countdown
                   </Button>
                 ) : (
-                  <Button
-                    variant="primary"
-                    size="xl"
-                    fullWidth
-                    onClick={() => setPhase('secret-a')}
-                  >
+                  <Button variant="primary" size="xl" fullWidth onClick={() => setPhase('secret-a')}>
                     Partner A: Enter Answer
                   </Button>
                 )}
                 <button
                   onClick={handleSkip}
-                  className="px-4 py-3 text-white/40 hover:text-white/60 text-sm font-semibold rounded-2xl bg-white/5 hover:bg-white/10 transition-all border border-white/10"
+                  className="px-4 text-white/40 hover:text-white/60 text-sm font-semibold rounded-2xl bg-white/5 hover:bg-white/10 transition-all border border-white/10 whitespace-nowrap"
+                  aria-label="Skip this prompt"
                 >
                   Skip
                 </button>
@@ -319,7 +344,7 @@ export function GameplayScreen() {
             </motion.div>
           )}
 
-          {/* COUNTDOWN */}
+          {/* ── COUNTDOWN ────────────────────────────────────────────── */}
           {phase === 'countdown' && (
             <motion.div
               key="countdown"
@@ -328,15 +353,15 @@ export function GameplayScreen() {
               exit={{ opacity: 0 }}
               className="flex flex-col items-center gap-6"
             >
-              <p className="text-white/50 text-lg font-semibold">{team.name}</p>
+              <p className="text-white/60 text-lg font-semibold">{team.name}</p>
 
               {countdown > 0 ? (
                 <motion.div
-                  key={countdown}
+                  key={`count-${countdown}`}
                   initial={{ scale: 0.3, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  exit={{ scale: 1.5, opacity: 0 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 15 }}
+                  exit={{ scale: 1.6, opacity: 0 }}
+                  transition={{ type: 'spring', stiffness: 350, damping: 14 }}
                   className="countdown-number gradient-text"
                 >
                   {countdown}
@@ -344,52 +369,53 @@ export function GameplayScreen() {
               ) : (
                 <motion.div
                   key="go"
-                  initial={{ scale: 0.3, opacity: 0 }}
+                  initial={{ scale: 0.2, opacity: 0 }}
                   animate={{ scale: 1, opacity: 1 }}
-                  transition={{ type: 'spring', stiffness: 350, damping: 12 }}
-                  className="text-[clamp(60px,20vw,140px)] font-black text-white"
-                  style={{ textShadow: '0 0 60px rgba(167,139,250,0.8)' }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 12 }}
+                  className="font-black text-white"
+                  style={{
+                    fontSize: 'clamp(70px, 22vw, 160px)',
+                    textShadow: '0 0 80px rgba(167,139,250,0.9)',
+                    lineHeight: 1,
+                  }}
                 >
                   GO!
                 </motion.div>
               )}
 
-              <p className="text-white/40 text-sm">
-                {countdown > 0 ? 'Get ready…' : 'Say your answer!'}
+              <p className="text-white/30 text-sm mt-2">
+                {countdown > 0 ? 'Get ready…' : 'Say your answer now!'}
               </p>
             </motion.div>
           )}
 
-          {/* JUDGING */}
+          {/* ── JUDGING ──────────────────────────────────────────────── */}
           {phase === 'judging' && !showResult && (
             <motion.div
               key="judging"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="flex flex-col items-center gap-6 w-full max-w-sm"
+              className="flex flex-col items-center gap-5 w-full max-w-sm"
             >
               <div className="text-center">
                 <motion.div
-                  animate={{ opacity: [0.7, 1, 0.7] }}
-                  transition={{ duration: 1.5, repeat: Infinity }}
+                  animate={{ scale: [1, 1.15, 1] }}
+                  transition={{ duration: 1.2, repeat: Infinity }}
                   className="text-5xl mb-3"
                 >
                   🎤
                 </motion.div>
-                <p className="text-2xl font-black text-white">REVEAL!</p>
-                <p className="text-white/50 text-sm mt-2">Both partners say their answers</p>
+                <p className="text-3xl font-black text-white">REVEAL!</p>
+                <p className="text-white/50 text-sm mt-1">Both partners say their answers</p>
               </div>
 
               {/* Timer */}
               {timerLeft !== null && (
                 <motion.div
-                  animate={timerLeft <= 5 ? { scale: [1, 1.05, 1] } : {}}
-                  transition={{ duration: 0.5, repeat: timerLeft <= 5 ? Infinity : 0 }}
-                  className={[
-                    'text-4xl font-black tabular-nums',
-                    timerLeft <= 5 ? 'text-red-400' : 'text-white',
-                  ].join(' ')}
+                  animate={timerLeft <= 5 ? { scale: [1, 1.08, 1] } : {}}
+                  transition={{ duration: 0.5, repeat: Infinity }}
+                  className={`text-5xl font-black tabular-nums ${timerLeft <= 5 ? 'text-red-400' : 'text-white'}`}
                 >
                   {timerLeft}
                 </motion.div>
@@ -397,16 +423,31 @@ export function GameplayScreen() {
 
               {/* Prompt reminder */}
               <div className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-center">
-                <div className="text-white/40 text-xs mb-1">Prompt</div>
+                {prompt && (
+                  <div className="text-xs text-white/30 mb-1">
+                    {CATEGORY_EMOJIS[prompt.category]} {CATEGORY_LABELS[prompt.category]}
+                  </div>
+                )}
                 <div className="text-white font-semibold">{prompt?.text}</div>
               </div>
+
+              {/* Streak indicator */}
+              {team.streak >= 2 && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  className="bg-orange-500/20 border border-orange-500/40 text-orange-300 px-4 py-2 rounded-full font-bold text-sm"
+                >
+                  🔥 {team.streak} match streak! Match for +{matchPoints} pts
+                </motion.div>
+              )}
 
               {/* Judge buttons */}
               <div className="w-full space-y-3">
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={() => handleResult(true)}
-                  className="w-full py-5 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-black text-2xl rounded-3xl shadow-2xl shadow-emerald-900/40 flex items-center justify-center gap-3 glow-green"
+                  className="w-full py-6 bg-gradient-to-r from-emerald-600 to-green-500 text-white font-black text-2xl rounded-3xl shadow-2xl shadow-emerald-900/40 flex items-center justify-center gap-3 glow-green"
                   aria-label="It's a match"
                 >
                   <span>✓</span>
@@ -415,7 +456,7 @@ export function GameplayScreen() {
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={() => handleResult(false)}
-                  className="w-full py-5 bg-gradient-to-r from-red-700 to-rose-700 text-white font-black text-2xl rounded-3xl shadow-2xl shadow-red-900/40 flex items-center justify-center gap-3 glow-red"
+                  className="w-full py-6 bg-gradient-to-r from-red-700 to-rose-600 text-white font-black text-2xl rounded-3xl shadow-2xl shadow-red-900/40 flex items-center justify-center gap-3 glow-red"
                   aria-label="No match"
                 >
                   <span>✕</span>
@@ -425,34 +466,30 @@ export function GameplayScreen() {
             </motion.div>
           )}
 
-          {/* RESULT */}
+          {/* ── RESULT OVERLAY ───────────────────────────────────────── */}
           {showResult && (
             <motion.div
               key="result"
-              initial={{ opacity: 0, scale: 0.6 }}
+              initial={{ opacity: 0, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 1.2 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              className="flex flex-col items-center gap-4"
+              transition={{ type: 'spring', stiffness: 300, damping: 18 }}
+              className="flex flex-col items-center gap-4 text-center"
             >
               {lastResult === 'match' ? (
                 <>
                   <motion.div
-                    animate={{ rotate: [0, -5, 5, 0], scale: [1, 1.1, 1] }}
-                    transition={{ duration: 0.5 }}
+                    animate={{ rotate: [-8, 8, -4, 4, 0], scale: [1, 1.15, 1] }}
+                    transition={{ duration: 0.6 }}
                     className="text-8xl"
                   >
                     🎉
                   </motion.div>
                   <div className="text-4xl font-black text-emerald-400">IT'S A MATCH!</div>
-                  {game.settings.scoringMode === 'streak' && game.teams[game.currentTeamIndex].streak >= 2 && (
-                    <div className="text-orange-300 font-bold">🔥 STREAK BONUS!</div>
+                  {game.settings.scoringMode === 'streak' && team.streak >= 1 && (
+                    <div className="text-orange-300 font-bold text-lg">🔥 Streak bonus!</div>
                   )}
-                  <div className="text-6xl font-black gradient-text-gold">+{
-                    game.settings.scoringMode === 'standard' ? 1 :
-                    game.settings.scoringMode === 'double' ? 2 :
-                    game.teams[game.currentTeamIndex].streak + 1
-                  }</div>
+                  <div className="text-7xl font-black gradient-text-gold">+{matchPoints}</div>
                 </>
               ) : (
                 <>
@@ -464,7 +501,7 @@ export function GameplayScreen() {
             </motion.div>
           )}
 
-          {/* SECRET MODE - Partner A */}
+          {/* ── SECRET MODE — Partner A ──────────────────────────────── */}
           {phase === 'secret-a' && (
             <motion.div
               key="secret-a"
@@ -474,13 +511,15 @@ export function GameplayScreen() {
               className="flex flex-col items-center gap-6 w-full max-w-sm"
             >
               <div className="text-center">
-                <div className="text-3xl mb-2">🙈</div>
-                <p className="text-xl font-bold text-white">Partner A</p>
+                <div className="text-4xl mb-2">🙈</div>
+                <p className="text-2xl font-bold text-white">Partner A</p>
                 <p className="text-white/50 text-sm mt-1">Type your answer — Partner B won't see it</p>
               </div>
 
-              <div className="w-full bg-purple-600/10 border border-purple-500/30 rounded-3xl p-6 text-center">
-                <div className="text-white/50 text-xs mb-3">Prompt</div>
+              <div className="w-full bg-purple-600/10 border border-purple-500/30 rounded-3xl p-5 text-center">
+                {prompt && (
+                  <div className="text-xs text-white/30 mb-2">{CATEGORY_EMOJIS[prompt.category]} {CATEGORY_LABELS[prompt.category]}</div>
+                )}
                 <div className="text-white font-bold">{prompt?.text}</div>
               </div>
 
@@ -490,22 +529,19 @@ export function GameplayScreen() {
                 onChange={(e) => setSecretA(e.target.value)}
                 placeholder="Type your answer…"
                 autoFocus
-                className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white text-lg font-semibold placeholder-white/30 focus:outline-none focus:border-purple-500 text-center"
+                autoComplete="off"
+                autoCorrect="off"
+                className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white font-semibold placeholder-white/30 focus:outline-none focus:border-purple-500 text-center"
+                style={{ fontSize: 18 }}
               />
 
-              <Button
-                variant="primary"
-                size="lg"
-                fullWidth
-                disabled={!secretA.trim()}
-                onClick={() => setPhase('pass-phone')}
-              >
+              <Button variant="primary" size="lg" fullWidth disabled={!secretA.trim()} onClick={() => setPhase('pass-phone')}>
                 Done →
               </Button>
             </motion.div>
           )}
 
-          {/* PASS PHONE */}
+          {/* ── PASS THE PHONE ───────────────────────────────────────── */}
           {phase === 'pass-phone' && (
             <motion.div
               key="pass-phone"
@@ -515,28 +551,23 @@ export function GameplayScreen() {
               className="flex flex-col items-center gap-8 w-full max-w-sm"
             >
               <motion.div
-                animate={{ x: [0, 20, -20, 0] }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
-                className="text-7xl"
+                animate={{ x: [0, 18, -18, 8, -8, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                className="text-8xl"
               >
                 📱
               </motion.div>
               <div className="text-center">
-                <p className="text-2xl font-black text-white">PASS THE PHONE</p>
-                <p className="text-white/50 mt-2">Give the phone to Partner B</p>
+                <p className="text-3xl font-black text-white">PASS THE PHONE</p>
+                <p className="text-white/50 mt-2 text-base">Give the phone to Partner B</p>
               </div>
-              <Button
-                variant="secondary"
-                size="lg"
-                fullWidth
-                onClick={() => setPhase('secret-b')}
-              >
+              <Button variant="secondary" size="lg" fullWidth onClick={() => setPhase('secret-b')}>
                 I'm Ready
               </Button>
             </motion.div>
           )}
 
-          {/* SECRET MODE - Partner B */}
+          {/* ── SECRET MODE — Partner B ──────────────────────────────── */}
           {phase === 'secret-b' && (
             <motion.div
               key="secret-b"
@@ -546,13 +577,15 @@ export function GameplayScreen() {
               className="flex flex-col items-center gap-6 w-full max-w-sm"
             >
               <div className="text-center">
-                <div className="text-3xl mb-2">🙈</div>
-                <p className="text-xl font-bold text-white">Partner B</p>
+                <div className="text-4xl mb-2">🙊</div>
+                <p className="text-2xl font-bold text-white">Partner B</p>
                 <p className="text-white/50 text-sm mt-1">Now it's your turn</p>
               </div>
 
-              <div className="w-full bg-purple-600/10 border border-purple-500/30 rounded-3xl p-6 text-center">
-                <div className="text-white/50 text-xs mb-3">Prompt</div>
+              <div className="w-full bg-purple-600/10 border border-purple-500/30 rounded-3xl p-5 text-center">
+                {prompt && (
+                  <div className="text-xs text-white/30 mb-2">{CATEGORY_EMOJIS[prompt.category]} {CATEGORY_LABELS[prompt.category]}</div>
+                )}
                 <div className="text-white font-bold">{prompt?.text}</div>
               </div>
 
@@ -562,22 +595,19 @@ export function GameplayScreen() {
                 onChange={(e) => setSecretB(e.target.value)}
                 placeholder="Type your answer…"
                 autoFocus
-                className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white text-lg font-semibold placeholder-white/30 focus:outline-none focus:border-purple-500 text-center"
+                autoComplete="off"
+                autoCorrect="off"
+                className="w-full bg-white/10 border border-white/20 rounded-2xl px-5 py-4 text-white font-semibold placeholder-white/30 focus:outline-none focus:border-purple-500 text-center"
+                style={{ fontSize: 18 }}
               />
 
-              <Button
-                variant="primary"
-                size="lg"
-                fullWidth
-                disabled={!secretB.trim()}
-                onClick={() => setPhase('reveal-answers')}
-              >
+              <Button variant="primary" size="lg" fullWidth disabled={!secretB.trim()} onClick={() => setPhase('reveal-answers')}>
                 Reveal Both →
               </Button>
             </motion.div>
           )}
 
-          {/* REVEAL BOTH ANSWERS */}
+          {/* ── REVEAL BOTH ANSWERS (secret mode) ────────────────────── */}
           {phase === 'reveal-answers' && !showResult && (
             <motion.div
               key="reveal-answers"
@@ -586,19 +616,22 @@ export function GameplayScreen() {
               exit={{ opacity: 0 }}
               className="flex flex-col items-center gap-6 w-full max-w-sm"
             >
-              <p className="text-xl font-black text-white">The Answers Are…</p>
+              <p className="text-2xl font-black text-white">The Answers Are…</p>
 
               <div className="w-full grid grid-cols-2 gap-3">
-                {[{ label: 'Partner A', answer: secretA }, { label: 'Partner B', answer: secretB }].map((p) => (
+                {[
+                  { label: 'Partner A', answer: secretA },
+                  { label: 'Partner B', answer: secretB },
+                ].map((p, i) => (
                   <motion.div
                     key={p.label}
-                    initial={{ scale: 0.8, opacity: 0 }}
+                    initial={{ scale: 0.7, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
-                    transition={{ delay: 0.2 }}
+                    transition={{ delay: i * 0.15 }}
                     className="bg-purple-600/20 border border-purple-500/30 rounded-2xl p-4 text-center"
                   >
                     <div className="text-white/40 text-xs mb-2">{p.label}</div>
-                    <div className="text-white font-bold text-lg">"{p.answer}"</div>
+                    <div className="text-white font-bold text-lg leading-tight">"{p.answer}"</div>
                   </motion.div>
                 ))}
               </div>
@@ -607,14 +640,14 @@ export function GameplayScreen() {
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={() => handleResult(true)}
-                  className="w-full py-5 bg-gradient-to-r from-emerald-600 to-green-600 text-white font-black text-2xl rounded-3xl shadow-2xl glow-green"
+                  className="w-full py-6 bg-gradient-to-r from-emerald-600 to-green-500 text-white font-black text-2xl rounded-3xl shadow-2xl glow-green"
                 >
                   ✓ MATCH
                 </motion.button>
                 <motion.button
                   whileTap={{ scale: 0.97 }}
                   onClick={() => handleResult(false)}
-                  className="w-full py-5 bg-gradient-to-r from-red-700 to-rose-700 text-white font-black text-2xl rounded-3xl shadow-2xl glow-red"
+                  className="w-full py-6 bg-gradient-to-r from-red-700 to-rose-600 text-white font-black text-2xl rounded-3xl shadow-2xl glow-red"
                 >
                   ✕ NO MATCH
                 </motion.button>
@@ -625,7 +658,7 @@ export function GameplayScreen() {
         </AnimatePresence>
       </div>
 
-      {/* Host Menu */}
+      {/* ── HOST MENU ──────────────────────────────────────────────────── */}
       <AnimatePresence>
         {showHostMenu && (
           <HostMenu
@@ -643,7 +676,7 @@ export function GameplayScreen() {
         )}
       </AnimatePresence>
 
-      {/* Edit Scores */}
+      {/* ── EDIT SCORES SHEET ──────────────────────────────────────────── */}
       <AnimatePresence>
         {showEditScore && (
           <motion.div
@@ -661,24 +694,26 @@ export function GameplayScreen() {
               onClick={(e) => e.stopPropagation()}
               className="bg-[#1a1a2e] border-t border-white/10 rounded-t-3xl p-6 w-full max-w-lg safe-bottom"
             >
-              <h3 className="text-xl font-bold text-white mb-4">Edit Scores</h3>
-              <div className="space-y-3 mb-6">
+              <h3 className="text-xl font-bold text-white mb-5">Edit Scores</h3>
+              <div className="space-y-4 mb-6">
                 {game.teams.map((t) => (
                   <div key={t.id} className="flex items-center justify-between gap-4">
-                    <span className="text-white font-semibold truncate">{t.name}</span>
-                    <div className="flex items-center gap-2">
+                    <span className="text-white font-semibold truncate flex-1">{t.name}</span>
+                    <div className="flex items-center gap-3">
                       <button
                         onClick={() => setEditScores((s) => ({ ...s, [t.id]: Math.max(0, (s[t.id] ?? t.score) - 1) }))}
-                        className="w-10 h-10 rounded-full bg-white/10 text-white font-bold hover:bg-white/20 transition-colors"
+                        className="w-11 h-11 rounded-full bg-white/10 text-white text-xl font-bold hover:bg-white/20 transition-colors"
+                        aria-label="Decrease score"
                       >
                         −
                       </button>
-                      <span className="w-8 text-center text-xl font-black text-white tabular-nums">
+                      <span className="w-10 text-center text-2xl font-black text-white tabular-nums">
                         {editScores[t.id] ?? t.score}
                       </span>
                       <button
                         onClick={() => setEditScores((s) => ({ ...s, [t.id]: (s[t.id] ?? t.score) + 1 }))}
-                        className="w-10 h-10 rounded-full bg-white/10 text-white font-bold hover:bg-white/20 transition-colors"
+                        className="w-11 h-11 rounded-full bg-white/10 text-white text-xl font-bold hover:bg-white/20 transition-colors"
+                        aria-label="Increase score"
                       >
                         +
                       </button>
@@ -697,7 +732,7 @@ export function GameplayScreen() {
                     setShowHostMenu(false);
                   }}
                 >
-                  Save
+                  Save Scores
                 </Button>
               </div>
             </motion.div>
@@ -705,7 +740,7 @@ export function GameplayScreen() {
         )}
       </AnimatePresence>
 
-      {/* Scoreboard overlay */}
+      {/* ── SCOREBOARD OVERLAY ─────────────────────────────────────────── */}
       <AnimatePresence>
         {showScoreboard && (
           <motion.div
@@ -723,11 +758,12 @@ export function GameplayScreen() {
               onClick={(e) => e.stopPropagation()}
               className="bg-[#1a1a2e] border-t border-white/10 rounded-t-3xl p-6 w-full max-w-lg safe-bottom"
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-5">
                 <h3 className="text-xl font-bold text-white">Leaderboard</h3>
-                <button onClick={() => setShowScoreboard(false)} className="text-white/40 hover:text-white">✕</button>
+                <button onClick={() => setShowScoreboard(false)} className="text-white/40 hover:text-white text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10">✕</button>
               </div>
               <Scoreboard teams={game.teams} activeTeamId={team.id} />
+              <p className="text-white/30 text-xs text-center mt-4">Tap anywhere to close</p>
             </motion.div>
           </motion.div>
         )}
@@ -737,11 +773,7 @@ export function GameplayScreen() {
 }
 
 function HostMenu({
-  onResume,
-  onEndGame,
-  onRestartRound,
-  onEditScores,
-  onSkip,
+  onResume, onEndGame, onRestartRound, onEditScores, onSkip,
 }: {
   onResume: () => void;
   onEndGame: () => void;
@@ -767,26 +799,26 @@ function HostMenu({
         onClick={(e) => e.stopPropagation()}
         className="bg-[#1a1a2e] border-t border-white/10 rounded-t-3xl p-6 w-full max-w-lg safe-bottom"
       >
-        <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-6" />
-        <h3 className="text-lg font-bold text-white/60 text-center mb-4 uppercase tracking-wider text-sm">Host Menu</h3>
+        <div className="w-12 h-1.5 bg-white/20 rounded-full mx-auto mb-5" />
+        <h3 className="text-sm font-semibold text-white/40 text-center uppercase tracking-widest mb-4">Host Menu</h3>
 
         {confirmEnd ? (
-          <div className="space-y-3">
-            <p className="text-white text-center font-semibold">End the game?</p>
-            <p className="text-white/50 text-center text-sm">Your progress will be lost.</p>
+          <div className="space-y-4">
+            <p className="text-white text-center font-bold text-lg">End the game?</p>
+            <p className="text-white/50 text-center text-sm">Current progress will not be saved.</p>
             <div className="flex gap-3 mt-4">
               <Button variant="ghost" fullWidth onClick={() => setConfirmEnd(false)}>Cancel</Button>
-              <Button variant="danger" fullWidth onClick={onEndGame}>End Game</Button>
+              <Button variant="danger" fullWidth onClick={onEndGame}>Yes, End Game</Button>
             </div>
           </div>
         ) : (
           <div className="space-y-2">
             {[
-              { label: '▶ Resume', action: onResume, variant: 'primary' as const },
-              { label: '⏩ Skip Prompt', action: onSkip, variant: 'secondary' as const },
-              { label: '↩ Restart Round', action: onRestartRound, variant: 'secondary' as const },
-              { label: '✏️ Edit Scores', action: onEditScores, variant: 'secondary' as const },
-              { label: '✕ End Game', action: () => setConfirmEnd(true), variant: 'danger' as const },
+              { label: '▶  Resume Game', action: onResume, variant: 'primary' as const },
+              { label: '⏩  Skip Prompt', action: onSkip, variant: 'secondary' as const },
+              { label: '↩  Restart Round', action: onRestartRound, variant: 'secondary' as const },
+              { label: '✏️  Edit Scores', action: onEditScores, variant: 'secondary' as const },
+              { label: '✕  End Game', action: () => setConfirmEnd(true), variant: 'danger' as const },
             ].map((item) => (
               <Button key={item.label} variant={item.variant} size="md" fullWidth onClick={item.action}>
                 {item.label}
