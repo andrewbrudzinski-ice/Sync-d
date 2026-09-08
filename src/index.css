@@ -1,0 +1,147 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --safe-top: env(safe-area-inset-top);
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-left: env(safe-area-inset-left);
+  --safe-right: env(safe-area-inset-right);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+body {
+  @apply bg-[#0f0f1a] text-white;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overscroll-behavior: none;
+  min-height: 100dvh;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100dvh;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+::-webkit-scrollbar-thumb {
+  background: #7c3aed;
+  border-radius: 2px;
+}
+
+/* Prevent text selection during gameplay */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Glass morphism card */
+.glass-card {
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(124, 58, 237, 0.2);
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #a78bfa 0%, #f9a8d4 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.gradient-text-gold {
+  background: linear-gradient(135deg, #f59e0b 0%, #fcd34d 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Button press effect */
+.btn-press {
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.btn-press:active {
+  transform: scale(0.96);
+}
+
+/* Glow effects */
+.glow-purple {
+  box-shadow: 0 0 30px rgba(124, 58, 237, 0.5);
+}
+.glow-green {
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.5);
+}
+.glow-red {
+  box-shadow: 0 0 30px rgba(239, 68, 68, 0.5);
+}
+.glow-gold {
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.5);
+}
+
+/* Countdown number style */
+.countdown-number {
+  font-size: clamp(80px, 25vw, 180px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.05em;
+}
+
+/* Prompt text style */
+.prompt-text {
+  font-size: clamp(24px, 6vw, 48px);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+/* Score badge */
+.score-badge {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Streak fire */
+.streak-badge {
+  animation: streakPulse 1s ease-in-out infinite;
+}
+
+@keyframes streakPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* Background gradient */
+.bg-game {
+  background: radial-gradient(ellipse at top, #1a0533 0%, #0f0f1a 60%);
+  min-height: 100dvh;
+  min-height: 100vh;
+}
+
+/* Safe area padding */
+.safe-top { padding-top: max(env(safe-area-inset-top), 16px); }
+.safe-bottom { padding-bottom: max(env(safe-area-inset-bottom), 16px); }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
